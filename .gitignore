@@ -1,0 +1,8 @@
+local_instance_types.json
+
+__pycache__
+
+.cache
+*.zip
+
+~$*

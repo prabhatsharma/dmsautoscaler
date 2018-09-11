@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  DMSInstance:
+    Description: DMS Instance that you want to enable autoscaling
+    Type: String
+    Default: "-"
+  NotificationSNSTopic:
+    Description: SNS Topic ARN that will be used for notifying autoscaling events
+    Type: String
+    Default: "-"
+  BucketName:
+    Description: Name of the s3 bucket that holds configuration file
+    Type: String
+    Default: prabhat00-public
+  S3KeyName:
+    Description: Nme of the configuration file
+    Type: String
+    Default: instance_types.json
+Resources:
+  iamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: dmsautoscaler
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: Stmt1528434137827
+            Action:
+            - s3:GetObject
+            Effect: Allow
+            Resource: "*"
+          - Sid: Stmt1528434233173
+            Action:
+            - dms:DescribeReplicationInstances
+            - dms:DescribeReplicationTasks
+            - dms:ModifyReplicationInstance
+            Effect: Allow
+            Resource: "*"
+          - Sid: Stmt1528473909949
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Effect: Allow
+            Resource: arn:aws:logs:*:*:*
+          - Sid: Stmt1528473909943
+            Action:
+            - cloudwatch:DeleteAlarms
+            - cloudwatch:EnableAlarmActions
+            - cloudwatch:GetMetricData
+            - cloudwatch:PutMetricAlarm
+            Effect: Allow
+            Resource: "*"
+          - Sid: Stmt1528473949712
+            Action:
+            - events:DeleteRule
+            - events:EnableRule
+            - events:PutRule
+            - events:PutTargets
+            - events:RemoveTargets
+            Effect: Allow
+            Resource: "*"
+          - Sid: Stmt1528474058666
+            Action:
+            - lambda:AddPermission
+            - lambda:RemovePermission
+            Effect: Allow
+            Resource: arn:aws:lambda:*:*:function:dms_autoscaler_cf
+          - Sid: Stmt1528474139639
+            Action:
+            - sns:Publish
+            Effect: Allow
+            Resource: "*"
+      RoleName: dmsautoscalererolretest
+  lambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: prabhat00-public
+        S3Key: dms.py.zip
+      FunctionName: dms_autoscaler_cf
+      Handler: dms.lambda_handler
+      Environment:
+        Variables:
+          TOPIC_ARN:
+            Ref: NotificationSNSTopic
+          BUCKET_NAME:
+            Ref: BucketName
+          KEY_NAME:
+            Ref: S3KeyName
+      Runtime: python3.6
+      MemorySize: 128
+      Timeout: 30
+      Description: DMS Autoscaler
+      Role:
+        Fn::GetAtt:
+        - iamRole
+        - Arn
+  lambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: dms_autoscaler_cf
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: snsTopic
+  snsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: dmsautoscalertest
+      Subscription:
+      - Endpoint:
+          Fn::GetAtt:
+          - lambdaFunction
+          - Arn
+        Protocol: lambda
+      TopicName: dmsautoscalertest
+  cloudWatchHighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      MetricName: CPUUtilization
+      Namespace: AWS/DMS
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Average
+      Threshold: '80'
+      ActionsEnabled: 'true'
+      AlarmActions:
+      - Ref: snsTopic
+      Dimensions:
+      - Name: ReplicationInstanceIdentifier
+        Value:
+          Ref: DMSInstance
+      AlarmDescription: High CPU usage by DMS instance.
+      AlarmName: dms_cpu_high
+  cloudWatchLowCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      MetricName: CPUUtilization
+      Namespace: AWS/DMS
+      ComparisonOperator: LessThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Average
+      Threshold: '30'
+      ActionsEnabled: 'true'
+      AlarmActions:
+      - Ref: snsTopic
+      Dimensions:
+      - Name: ReplicationInstanceIdentifier
+        Value:
+          Ref: DMSInstance
+      AlarmDescription: Low CPU usage by DMS instance.
+      AlarmName: dms_cpu_low
+  cloudWatchHighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      MetricName: FreeableMemory
+      Namespace: AWS/DMS
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Average
+      Threshold: '1000000000' # 100 MB. If freeable memory is less than 100 MB then raise alarm
+      ActionsEnabled: 'true'
+      AlarmActions:
+      - Ref: snsTopic
+      Dimensions:
+      - Name: ReplicationInstanceIdentifier
+        Value:
+          Ref: DMSInstance
+      AlarmDescription: High Memory usage by DMS instance.
+      AlarmName: dms_memory_high
+Outputs:
+  IAMRole:
+    Description: IAM Role for the lambda function
+    Value:
+      Fn::GetAtt:
+      - iamRole
+      - Arn
+  LambdaFunction:
+    Description: DMS Autoscaler lambda function
+    Value:
+      Fn::GetAtt:
+      - lambdaFunction
+      - Arn
+  SNSTopic:
+    Description: SNS Topic that will act as bridge between cloudwatch alarm and lambda
+      function
+    Value:
+      Ref: snsTopic
