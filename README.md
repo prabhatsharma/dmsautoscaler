@@ -1,50 +1,39 @@
-# dms_autoscaling
+# AWS DMS Vertical Autoscaler
 
-This code helps to autoscale replication instance
+This repository contains code for the blog article {{link for the blog}}.
 
-Creation Process:
+## How to auto-scale AWS Database Migration Service (DMS) replication instance 
 
-1. Create SNS topics "dms_mailer" and "dms_autoscaler". dms_mailer will be used to notify users of autoscaling activities. dms_autoscaler will be used to publish the message from cloudwatch alarm data. dms_autoscaler topic will target the lambda function for autoscaling.
-2. create alarms:
-    1. dms-cpu-high
-    2. dms-cpu-low
-    3. dms-memory-high
-    4. dms-memory-low - How to create this?
-3. Point both alarms to SNS topic "dms"
-4. Create lambda function
-5. subscribe your lambda function to sns "dms"
+AWS Database Migration Service (DMS) helps to migrate databases to AWS quickly and securely. The AWS DMS migration process encompasses setting up a replication instance, source and target endpoints, and replication tasks. The replication task runs on the replication instance and moves data from the source endpoint to the target endpoint. 
+Replication instance uses resources like CPU, Memory, storage and IO which may get constrained depending on the size of the instance chosen and the kind of workload. 
+
+This post gives a quick overview of how you can auto-scale AWS DMS replication instance to handle higher load (scale up) when required and save money (scale down) when load is low.
+
+Problem/use case
+- When setting up an AWS DMS replication instance, customers must analyze 
+- The number of tables in the database
+- The volume of data in those tables 
+- Number of concurrent replication tasks
+- Traffic to source database
+In order to have the AWS DMS replication instance right-sized, we must be able to predict the right resource utilization (CPU and memory).
+
+## Solution
+
+AWS DMS best practices whitepaper outlines a number of strategies to provision the right-sized AWS DMS replication instance. In this post, we will show you how to achieve even higher flexibility in sizing the AWS DMS replication instance using Amazon CloudWatch (CW) to monitor AWS DMS replication instance for CPU utilization or memory utilization or both. Once the cloudwatch alarm threshold reaches, it triggers Amazon Simple Notification Service (Amazon SNS) notification subscribed by AWS Lambda function to modify replication instance and also notifies if the tasks running on the new replication instance started successfully or not.
+We will show you how to do this in five main steps.
+1.	Create an IAM Role and Policy that grants Lambda function permissions to access the AWS resources needed.
+2.	Create an Amazon Simple Notification Service (SNS) topic that will be used by the Lambda function to notify the user regarding the status of the AWS DMS replication instance. 
+3.	Create a Lambda function that performs the AWS replication instance modification, and creates an Amazon Cloudwatch Scheduled event. This event invokes Lambda function every one minute to poll AWS DMS replication instance for its status after instance modification started. Once the replication modification completes then, it deletes the Amazon Cloudwatch Scheduled event.
+4.	Create another Amazon Simple Notification Service (SNS) topic that is invoked by Cloudwatch Alarm state changes. Subscribe the Lambda function to this SNS topic.
+ 5.	Create Amazon Cloudwatch alarms that watch metrics for the AWS DMS replication instance for 
+    - High CPU utilization
+    - Low CPU utilization
+    - High memory utilization.
 
 
-There can be 2 events that fire lambda function:
-1. One of the preconfigured alarms get into "ALARM" state and send message to sns topic dms_autoscaler.
-    1. lambda that is subscribed to sns would get triggered.
-    2. lambda will initiate the instance modification process
-    3. After the modification process is started (may take 3-20 minutes to complete), it creates a new cloudwatch scheduled event with replication instance and replication task details.
-    4. scheduled event targets the same lambda function to execute every 1 minute.
-    5. scheduled event contains metadata about the replication instance
-2. scheduled event would trigger the lambda function every 1 minute
-    1. lambda function needs to identify how it was triggered.
-    2. Once lambda trigger identifies that it was triggered by scheduled event it should check for following:
-        1. has the instance state become available?
-        2. has the status of tasks become same as that of hat has been passed by the event.
-        3. if both the above items are satisfied then send a mail to user about instance modification
-        4. delete the scheduled event
+AWS DMS is region-based, and it is necessary to set up your alarm and resources in each AWS Region separately.
+
 
 ![DMS autoscaler architecture](https://i.imgur.com/xs5dLSX.png)
 
-To test cpu-high/low trigger function manually (need to add --cli-data parameter):
-
-> aws cloudwatch set-alarm-state --alarm-name=dms-cpu-high --state-value="ALARM" --state-reason="Testing1"
-
-> aws cloudwatch set-alarm-state --alarm-name=dms-cpu-low --state-value="ALARM" --state-reason="Testing1"
-
-From - https://docs.aws.amazon.com/dms/latest/userguide/CHAP_Monitoring.html 
-
-Freeable memory is not a indication of the actual free memory available. It is the memory that is currently in use that can be freed and used for other uses; it's is a combination of buffers and cache in use on the replication instance.
-While the FreeableMemory metric does not reflect actual free memory available, the combination of the FreeableMemory and SwapUsage metrics can indicate if the replication instance is overloaded.
-
-Monitor these two metrics for the following conditions.
-• The FreeableMemory metric approaching zero.
-• The SwapUsage metric increases or fluctuates.
-
-If you see either of these two conditions, they indicate that you should consider moving to a larger replication instance. You should also consider reducing the number and type of tasks running on the replication instance. Full Load tasks require more memory than tasks that just replicate changes.
+You can use the [dms_autoscaler-cfn.yaml](dms_autoscaler-cfn.yaml) to setup everything.
