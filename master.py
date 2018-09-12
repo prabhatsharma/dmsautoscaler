@@ -1,3 +1,6 @@
+# Copyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Licensed under the MIT No Attribution aka MIT-Zero (https://github.com/aws/mit-0) license
+
 import dms
 import json
 
