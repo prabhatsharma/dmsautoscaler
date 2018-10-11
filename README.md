@@ -9,7 +9,7 @@ Replication instance uses resources like CPU, Memory, storage and IO which may g
 
 This post gives a quick overview of how you can auto-scale AWS DMS replication instance to handle higher load (scale up) when required and save money (scale down) when load is low.
 
-Problem/use case
+## Problem/use case
 - When setting up an AWS DMS replication instance, customers must analyze 
 - The number of tables in the database
 - The volume of data in those tables 
