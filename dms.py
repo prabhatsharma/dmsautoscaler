@@ -9,6 +9,7 @@ import time
 import os
 
 events_client = boto3.client('events')
+cloudwatch = boto3.client('cloudwatch')
 lambda_client = boto3.client('lambda')
 dms_client = boto3.client('dms')
 sns = boto3.client('sns')
@@ -35,7 +36,7 @@ def get_replication_instance_details(replication_instance_name):
 
 # Send notification for successful/failed instance modification operation
 def send_sns(subject, message):
-    """Sends message to a SNS. This is primarily for notfying status of 
+    """Sends message to a SNS. This is primarily for notifying status of 
     instance modification operation at various stages"""
 
     topicArn = ''
@@ -54,7 +55,7 @@ def send_sns(subject, message):
     
 
 def get_replication_tasks(replication_instance_arn):
-    """Returns the ist of repication tasks"""
+    """Returns the ist of replication tasks"""
     existing_tasks = []
     dms_client = boto3.client('dms')
     replication_tasks = dms_client.describe_replication_tasks()
@@ -66,7 +67,7 @@ def get_replication_tasks(replication_instance_arn):
 
 def create_cloudwatch_event(event, context, replication_instance_details, replication_tasks):
     """Creates a scheduled cloudwatch event to temporarily poll instance after modification request 
-    has been initiated. This sechduled event will initiate this very same lambda function
+    has been initiated. This scheduled event will initiate this very same lambda function
     every 1 minute to deal with maximum execution time limit of 5 minutes for lambda. Nice trick :-)
     """
     
@@ -93,6 +94,7 @@ def create_cloudwatch_event(event, context, replication_instance_details, replic
     # Create that that we will store in scheduled event for persisting through the entire instance modification process
     target_input = {
         "replication_instance": replication_instance_name,
+        "alarm_name": event["AlarmName"],
         "existing_tasks": replication_tasks,
         "start_time": time.time()   # store the start time of instance modification. Will use this for timeout calculation
     }
@@ -104,7 +106,7 @@ def create_cloudwatch_event(event, context, replication_instance_details, replic
         Rule="dms-scheduled-event-" + replication_instance_name,
         Targets=[
             {
-                'Id': "1",  # we will use this ID during deletion of theis target later as well
+                'Id': "1",  # we will use this ID during deletion of this target later as well
                 'Arn': self_arn,
                 'Input': json.dumps(target_input)
             }
@@ -127,8 +129,9 @@ def delete_cloudwatch_event(event):
         Name=rule_name
     )
     
-    print('Response to delete cludwatch scheduled event: ', rule_name , ' is: ', response)
-    
+    print('Response to delete cloudwatch scheduled event: ', rule_name , ' is: ', response)
+
+
 def get_next_instance_class(existing_instance_class, scale_type):
     """Return the next higher/lower instance type to which the instance will be modified.
     scale_type: cpu_high, cpu_low, memory_high, memory_low
@@ -139,13 +142,13 @@ def get_next_instance_class(existing_instance_class, scale_type):
     try:
         BUCKET_NAME = os.environ['BUCKET_NAME']
     except:
-        BUCKET_NAME = 'prabhat00-public'  # bucket that holds the json file
+        BUCKET_NAME = 'aws-database-blog'  # bucket that holds the json file
     
     KEY_NAME = ""
     try:
         KEY_NAME = os.environ['KEY_NAME']
     except:
-        KEY_NAME = 'instance_types.json'  # name of the json file
+        KEY_NAME = 'artifacts/auto_scale_DMS_replication_instance/instance_types.json'  # name of the json file
     
     obj = s3_client.Object(BUCKET_NAME, KEY_NAME)
     
@@ -154,24 +157,24 @@ def get_next_instance_class(existing_instance_class, scale_type):
     ######### Got the json resource file from bucket ##########
 
     ## If autoscaling up or down is disabled in json resource file then quit ###
-    autscaling_up_enabled = instance_types['autscaling_up_enabled']
-    autscaling_down_enabled = instance_types['autscaling_down_enabled']
+    autoscaling_up_enabled = instance_types['autscaling_up_enabled']
+    autoscaling_down_enabled = instance_types['autscaling_down_enabled']
 
-    if (scale_type == 'cpu_high' or scale_type == 'memory_high') and autscaling_up_enabled == 'false':
+    if (scale_type == 'cpu_high' or scale_type == 'memory_high') and autoscaling_up_enabled == 'false':
         print('Autoscaling UP is disabled in:' + file_path + '. Quitting now.. Bye!!!')
         return
-    elif (scale_type == 'cpu_low' or scale_type == 'memory_low') and autscaling_down_enabled == 'false':
+    elif (scale_type == 'cpu_low' or scale_type == 'memory_low') and autoscaling_down_enabled == 'false':
         print('Autoscaling DOWN is disabled in:' + file_path + '. Quitting now.. Bye!!!')
         return
     ###### resource file autoscaling configration check complete ######
 
     next_instance_type = instance_types[existing_instance_class][scale_type]
     
-    print('next_instance_type: ', next_instance_type)
+    print('existing_instance_type: ', existing_instance_class, ', next_instance_type: ', next_instance_type)
 
     if next_instance_type == 'no_action':
         print('Not taking action for :', existing_instance_class, ' for :', scale_type , ' as defined in: ', file_path)
-        return 0    
+        return 'no_action'    
     return next_instance_type
 
 def poll_instance(replication_instance_name):
@@ -202,7 +205,7 @@ def poll_tasks(existing_tasks, replication_instance_arn):
 
 
 def dms_event_handler(event, context):
-    """ Handle the event if the lambda function is truggered by DMS alarm (via SNS topic) """
+    """ Handle the event if the lambda function is triggered by DMS alarm (via SNS topic) """
     # Get our replication instance name
     replication_instance_name = event['Trigger']['Dimensions'][0]['value']
 
@@ -265,8 +268,9 @@ def shorten_replication_tasks(replication_tasks):
 
 def scheduled_event_handler(event):
     print('scheduled event is: ', event)
-    """ Handle the scheduled event. Primary purpose of this metod is:
-    1. Poll the instance status to see if it has become avaiable again.\n 2. Check teh status of already running tasks is same after modification. 
+    """ Handle the scheduled event. Primary purpose of this method is:
+    1. Poll the instance status to see if it has become available again.\n 
+    2. Check the status of already running tasks is same after modification. 
      """
     replication_instance_name = event['replication_instance']
 
@@ -292,17 +296,31 @@ def scheduled_event_handler(event):
         print("Still waiting for tasks to start")
     elif task_poll_status == 0:
         print('############# Polling tasks also complete. All done ###############')
+        # initiate cleanup
+        
+        # set alarm status to OK so that it can trigger again
+        cloudwatch.set_alarm_state(AlarmName=event["alarm_name"], 
+            StateValue="OK", 
+            StateReason="resetting so that it can get triggered again later.")
+        
+        # delete the scheduled event so it stops triggering lambda again and again
         delete_cloudwatch_event(event)
-        send_sns("Instance modification completed: " + replication_instance_name, "DMS Instance upgrade/downgrade succesful: " + replication_instance_name)
+        send_sns("Instance modification completed: " + replication_instance_name, "DMS Instance upgrade/downgrade successful: " + replication_instance_name)
     
     modification_timeout = 0
     
     try:
+        # get the MODIFICATION_TIMEOUT value from env variable if available
         modification_timeout = os.environ['MODIFICATION_TIMEOUT']
+        modification_timeout = int(modification_timeout)
     except:
+        # else use a default value for MODIFICATION_TIMEOUT
         modification_timeout = 1200 # default 20 minutes
+        
+    current_time = time.time()
+    start_time = event["start_time"]
 
-    if time.time() - event["start_time"] > modification_timeout:
+    if current_time - start_time > modification_timeout:
         print("Instance upgrade/downgrade timed out. Timeout was: ", modification_timeout, ' seconds')
         delete_cloudwatch_event(event)
         send_sns("DMS Instance upgrade/downgrade timed out for: " + replication_instance_name, "DMS Instance upgrade/downgrade timed out for: " + replication_instance_name)
@@ -310,13 +328,22 @@ def scheduled_event_handler(event):
 def lambda_handler(event, context):
     # Find the type of event scheduled or dms
     dms_alarms = ['dms_cpu_high', 'dms_cpu_low', 'dms_memory_high', 'dms_memory_low']
-
-    if "replication_instance" in event:
+    
+    message = ''
+    
+    try:
+        # if event is from SNS then we need to convert the message from text to json
+        message = json.loads(event["Records"][0]["Sns"]["Message"])
+    except:
+        # if message is not from SNS then its from scheduled cloudwatch event and we process it directly
+        message = event
+    
+    if "replication_instance" in message:
         print("------cloudwatch scheduled event------")
-        scheduled_event_handler(event)
-    elif event["AlarmName"] in dms_alarms:
-        print("------dms event-------")
-        dms_event_handler(event, context)
+        scheduled_event_handler(message)
+    elif message["AlarmName"] in dms_alarms:
+        print("------dms event: ", message["AlarmName"] ," -------")
+        dms_event_handler(message, context)
 
     return 0
 

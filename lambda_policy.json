@@ -34,7 +34,8 @@
                 "cloudwatch:DeleteAlarms",
                 "cloudwatch:EnableAlarmActions",
                 "cloudwatch:GetMetricData",
-                "cloudwatch:PutMetricAlarm"
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:SetAlarmState"
             ],
             "Effect": "Allow",
             "Resource": "*"
@@ -58,7 +59,7 @@
                 "lambda:RemovePermission"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:lambda:*:*:function:dms_autoscaler"
+            "Resource": "arn:aws:lambda:*:*:function:*"
         },
         {
             "Sid": "Stmt1528474139639",
