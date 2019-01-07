@@ -3,10 +3,17 @@
 
 import dms
 import json
+import boto3
 
-f = open("dms-event.json", "rb")
+f = open("event-cpu-low.json", "rb")
 # f = open("cloudwatch-scheduled-event.json", "rb")
-data = json.loads(f.read())
+data = f.read().decode('utf-8')
 f.close()
+
+boto3.setup_default_session(profile_name='ballu')
+
+# print(type(data))
+
+# print(data['Records'][0]['Sns']['Message'])
 
 dms.lambda_handler(data,1)

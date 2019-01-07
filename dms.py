@@ -157,8 +157,8 @@ def get_next_instance_class(existing_instance_class, scale_type):
     ######### Got the json resource file from bucket ##########
 
     ## If autoscaling up or down is disabled in json resource file then quit ###
-    autoscaling_up_enabled = instance_types['autscaling_up_enabled']
-    autoscaling_down_enabled = instance_types['autscaling_down_enabled']
+    autoscaling_up_enabled = instance_types['autoscaling_up_enabled']
+    autoscaling_down_enabled = instance_types['autoscaling_down_enabled']
 
     if (scale_type == 'cpu_high' or scale_type == 'memory_high') and autoscaling_up_enabled == 'false':
         print('Autoscaling UP is disabled in:' + file_path + '. Quitting now.. Bye!!!')
