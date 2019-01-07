@@ -163,25 +163,6 @@ Resources:
           Ref: DMSInstance
       AlarmDescription: Low CPU usage by DMS instance.
       AlarmName: dms_cpu_low
-  cloudWatchHighMemoryAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      MetricName: FreeableMemory
-      Namespace: AWS/DMS
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      EvaluationPeriods: '1'
-      Period: '60'
-      Statistic: Average
-      Threshold: '1000000000' # 100 MB. If freeable memory is less than 100 MB then raise alarm
-      ActionsEnabled: 'true'
-      AlarmActions:
-      - Ref: snsTopic
-      Dimensions:
-      - Name: ReplicationInstanceIdentifier
-        Value:
-          Ref: DMSInstance
-      AlarmDescription: High Memory usage by DMS instance.
-      AlarmName: dms_memory_high
 Outputs:
   IAMRole:
     Description: IAM Role for the lambda function
